@@ -1,0 +1,30 @@
+version: '3.9'
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    container_name: gateway-service
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=gateway
+      - PORT=8000
+      - RAILWAY_ENVIRONMENT=${RAILWAY_ENVIRONMENT}
+      - DATABASE_URL=${DATABASE_URL}
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: login-frontend
+    depends_on:
+      - gateway
+    environment:
+      - NEXT_PUBLIC_API_BASE_URL=http://gateway:8000
+    ports:
+      - "3000:3000"
+    restart: unless-stopped

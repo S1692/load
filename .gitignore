@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.pdb
+*.egg-info/
+.env
+.env.*
+
+# VSCode
+.vscode/
+
+# Node.js/Next.js
+node_modules/
+.next/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.pid
+
+# Build
+build/
+dist/
+*.tsbuildinfo
+
+# Database
+*.sqlite3
+*.db
+
+# Others
+.qodo/
