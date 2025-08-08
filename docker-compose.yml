@@ -8,12 +8,22 @@ services:
     env_file:
       - .env
     environment:
-      - SERVICE_NAME=gateway
-      - PORT=8000
-      - RAILWAY_ENVIRONMENT=${RAILWAY_ENVIRONMENT}
-      - DATABASE_URL=${DATABASE_URL}
+      - USER_SERVICE_URL=${USER_SERVICE_URL}
     ports:
       - "8000:8000"
+    restart: unless-stopped
+    depends_on:
+      - user-service
+
+  user-service:
+    build:
+      context: .
+      dockerfile: service/Dockerfile
+    container_name: user-service
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
     restart: unless-stopped
 
   frontend:
@@ -24,7 +34,7 @@ services:
     depends_on:
       - gateway
     environment:
-      - NEXT_PUBLIC_API_BASE_URL=http://gateway:8000
+      - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_GATEWAY_URL}
     ports:
       - "3000:3000"
     restart: unless-stopped
