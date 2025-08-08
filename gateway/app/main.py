@@ -43,14 +43,22 @@ USER_SERVICE_URL = os.getenv("USER_SERVICE_URL", "http://localhost:8001")
 # ----------------------------------------------------------------------------
 app = FastAPI(title="Gateway Service")
 
+# 개별 도메인 화이트리스트 + vercel 프리뷰(브랜치)까지 허용
+ALLOWED_ORIGINS = [
+    "https://load-sigma.vercel.app/",           # 프로덕션 프론트
+    # 필요하면 여기에 더 추가
+]
+ALLOW_ORIGIN_REGEX = r"^https:\/\/[a-z0-9-]+\.vercel\.app$"  # 모든 Vercel 프리뷰 허용
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=ALLOW_ORIGIN_REGEX,  # 프리뷰 브랜치 대응
+    allow_credentials=True,                 # 쿠키/인증 사용 시 True
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
-
 # ----------------------------------------------------------------------------
 # Schemas (for validation, even if logic is in user-service)
 # ----------------------------------------------------------------------------
