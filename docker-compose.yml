@@ -1,22 +1,48 @@
 version: '3.8'
 
 services:
-  llm-service:
-    build:
-      context: ./llm-service
-      dockerfile: Dockerfile
-    container_name: llm-service
-    # .env.example을 기반으로 .env 파일을 생성하여 사용하세요.
-    # OLLAMA_BASE_URL을 호스트 환경에 맞게 설정해야 합니다.
-    env_file:
-      - ./llm-service/.env
-    # 내부 네트워크에서만 접근 가능하도록 포트를 노출하지 않습니다.
-    # 게이트웨이를 통해서만 접근합니다.
+  db:
+    image: postgres:13-alpine
+    container_name: rag_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=ragdb
+    ports:
+      - "5432:5432"
     networks:
-      - llm_net
+      - app_net
+    restart: unless-stopped
+
+  auth-service:
+    build:
+      context: ./service
+      dockerfile: Dockerfile
+    container_name: auth-service
+    # auth_service가 DB에 연결하기 위한 환경변수.
+    # 실제 auth_service 코드에 맞게 변수명을 조정해야 할 수 있습니다.
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/ragdb
+    depends_on:
+      - db
+    networks:
+      - app_net
+    restart: unless-stopped
+
+  chatbot-service:
+    build:
+      context: ./service/chatbot_service
+      dockerfile: Dockerfile
+    container_name: chatbot-service
+    env_file:
+      - ./service/chatbot_service/.env
     # Linux에서는 다음 설정이 필요할 수 있습니다.
     # extra_hosts:
     #  - "host.docker.internal:host-gateway"
+    networks:
+      - app_net
     restart: unless-stopped
 
   gateway:
@@ -25,35 +51,36 @@ services:
       dockerfile: Dockerfile
     container_name: gateway
     ports:
-      # 외부 포트 8000을 컨테이너 내부 포트 8000에 매핑합니다.
       - "8000:8000"
     environment:
-      # Docker 내부 네트워크에서 서비스 이름으로 llm-service에 접근합니다.
-      - LLM_SERVICE_URL=http://llm-service:8001
+      - CHATBOT_SERVICE_URL=http://chatbot-service:8001
+      # - AUTH_SERVICE_URL=http://auth-service:8081 # 필요시 활성화
     depends_on:
-      - llm-service
+      - chatbot-service
+      - auth-service
     networks:
-      - llm_net
+      - app_net
     restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile # 프런트엔드 Dockerfile을 추가해야 합니다.
+      dockerfile: Dockerfile
     container_name: frontend
     ports:
-      # 외부 포트 3000을 컨테이너 내부 포트 3000에 매핑합니다.
       - "3000:3000"
     environment:
       # Next.js 앱이 게이트웨이에 접근할 수 있도록 URL을 전달합니다.
-      # Docker 외부에서 접근하는 URL이므로 localhost를 사용합니다.
       - NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
     depends_on:
       - gateway
     networks:
-      - llm_net
+      - app_net
     restart: unless-stopped
 
 networks:
-  llm_net:
+  app_net:
     driver: bridge
+
+volumes:
+  postgres_data:

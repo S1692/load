@@ -1,44 +1,47 @@
-# Stage 1: Build the Next.js application
-FROM node:20-alpine AS builder
+## Dockerfile for the Next.js frontend
+#
+# This Dockerfile performs a multi‑stage build to install dependencies,
+# compile the production assets, and run the application using the
+# built‑in Next.js server. The image expects the environment variable
+# `NEXT_PUBLIC_API_BASE_URL` to point at the FastAPI backend (e.g.
+# `http://backend:8000`) so that the front‑end can send login requests.
 
-# Set working directory
+FROM node:20-alpine AS deps
+
 WORKDIR /app
 
-# Copy package.json and lock files
-# Using npm ci for faster, more reliable builds in CI/CD environments
-COPY package*.json ./
-RUN npm ci
+# Install pnpm and dependencies based on the package.json and pnpm-lock.yaml.
+COPY frontend/package.json ./
+COPY frontend/pnpm-lock.yaml ./
 
-# Copy the rest of the application source code
-COPY . .
+RUN npm install -g pnpm \
+    && pnpm install --frozen-lockfile
 
-# Build the application
-# The NEXT_PUBLIC_API_BASE_URL is passed in docker-compose, but it's better to
-# make it available during build time if needed for static generation.
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
+
+# Copy application source
+COPY frontend .
+
+# Build the production version of the app. This will output files into
+# the `.next` directory.
 RUN npm run build
 
-# Stage 2: Production image, using standalone output for smaller size
-FROM node:20-alpine
-
+FROM node:20-alpine AS runner
 WORKDIR /app
 
-# We need to set this user to avoid running as root
-# Create a non-root user and group
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nextjs -u 1001
-
-# Copy the standalone output from the builder stage.
-# This requires `output: 'standalone'` in next.config.js
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
+# Copy built assets and node modules
+COPY --from=builder /app /.next /.next
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/node_modules ./node_modules
 
-# Set the owner of the files to the non-root user
-USER nextjs
-
-# Expose the port the app runs on
+# Expose the port that Next.js listens on
 EXPOSE 3000
 
-# The command to run the application
-# The port is specified here, matching the EXPOSE instruction
-CMD ["node", "server.js"]
+ENV NODE_ENV=production
+
+# Start the server
+CMD ["npm", "start"]

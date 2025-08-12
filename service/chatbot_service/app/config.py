@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     .env 파일이나 환경 변수에서 값을 로드합니다.
     """
     model_config = SettingsConfigDict(
+        # .env 파일은 서비스의 루트 디렉토리에 위치합니다.
         env_file=".env",
         env_file_encoding='utf-8',
         extra='ignore'
@@ -17,7 +18,6 @@ class Settings(BaseSettings):
     OLLAMA_EMBED_MODEL: str = "nomic-embed-text"
     JSON_PATH: str = "./data/merged_cbam_data.json"
 
-    # CORS_ALLOW_ORIGINS는 콤마로 구분된 문자열로 받아 리스트로 변환
     CORS_ALLOW_ORIGINS_STR: str = "*"
 
     @property

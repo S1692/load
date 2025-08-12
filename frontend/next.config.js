@@ -1,8 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // output: 'standalone' is recommended for optimized Docker images.
-  // It creates a 'standalone' folder with a minimal server and dependencies.
-  output: 'standalone',
-};
+  reactStrictMode: true,
+}
 
-module.exports = nextConfig;
+module.exports = nextConfig

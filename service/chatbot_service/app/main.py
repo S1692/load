@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
     logger.info("애플리케이션 종료.")
 
 app = FastAPI(
-    title="LLM RAG Service",
+    title="Chatbot RAG Service",
     description="Ollama와 LangChain을 이용한 RAG API",
     version="1.0.0",
     lifespan=lifespan,
@@ -126,12 +126,10 @@ async def generate_stream(request: GenerateRequest):
                     yield json.dumps({"token": token})
                 if "sources" in chunk:
                     sources = chunk["sources"]
-                await asyncio.sleep(0.01) # 클라이언트 렌더링을 위한 약간의 지연
+                await asyncio.sleep(0.01)
 
             # 스트림 마지막에 최종 결과와 출처 전송
             yield json.dumps({"final": final_result, "sources": sources})
-            # SSE 스트림 종료 이벤트. 프롬프트에서는 event:end를 원했지만, [DONE]이 더 표준적인 방식.
-            # 클라이언트에서 파싱하기 용이하도록 이벤트 타입을 명시하는 대신, content에 종료 신호를 보냄
             yield json.dumps({"event": "end"})
         except Exception as e:
             logger.error(f"스트리밍 중 오류 발생: {e}", exc_info=True)
@@ -139,9 +137,6 @@ async def generate_stream(request: GenerateRequest):
 
     return EventSourceResponse(event_generator(), media_type="text/event-stream")
 
-# uvicorn으로 직접 실행 시 (개발용)
 if __name__ == "__main__":
     import uvicorn
-    # Dockerfile에서 Gunicorn을 사용하므로, 포트는 Dockerfile/docker-compose에서 관리
-    # 이 uvicorn 실행은 순수 로컬 개발 환경을 위함
     uvicorn.run(app, host="0.0.0.0", port=8001)
