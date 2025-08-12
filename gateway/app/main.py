@@ -1,236 +1,84 @@
 import os
-import re
-import json
-import logging
-from datetime import datetime
-from typing import Optional
-
 import httpx
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr
-from starlette.responses import JSONResponse
+import logging
 
-# ----------------------------------------------------------------------------
-# Logging setup
-# ----------------------------------------------------------------------------
-logger = logging.getLogger("gateway")
-logger.setLevel(logging.INFO)
-if not logger.handlers:
-    handler = logging.StreamHandler()
+# 로깅 설정
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-    class EmojiFormatter(logging.Formatter):
-        def format(self, record):
-            log_message = super().format(record)
-            if "request.downstream" in record.msg:
-                return f"↘️  {log_message}"
-            if "response.upstream" in record.msg:
-                return f"↖️  {log_message}"
-            if "request" in record.msg:
-                return f"➡️  {log_message}"
-            if "response" in record.msg:
-                return f"⬅️  {log_message}"
-            return f"ℹ️  {log_message}"
+# 환경 변수에서 LLM 서비스 URL 로드, Docker Compose에서 서비스 이름으로 설정
+LLM_SERVICE_URL = os.getenv("LLM_SERVICE_URL", "http://llm-service:8001")
 
-    handler.setFormatter(EmojiFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-    logger.addHandler(handler)
-
-
-def log_event(event: str, **kwargs):
-    parts = [f"event='{event}'"]
-    for k, v in kwargs.items():
-        parts.append(f"{k}='{v}'")
-    logger.info(" ".join(parts))
-
-
-# ----------------------------------------------------------------------------
-# Service configuration
-# ----------------------------------------------------------------------------
-# 예: USER_SERVICE_URL = "https://user-service-production-xxxx.up.railway.app"
-# 또는 같은 프로젝트 내부 네트워크: "http://user-service:8080"
-USER_SERVICE_URL = os.getenv("USER_SERVICE_URL", "").strip()
-
-PUBLIC_URL = (os.getenv("PUBLIC_URL") or os.getenv("RAILWAY_PUBLIC_DOMAIN") or "").strip()
-
-def _norm(u: str) -> str:
-    return (u or "").replace("https://", "").replace("http://", "").strip("/")
-
-if not USER_SERVICE_URL:
-    logger.error("[FATAL] USER_SERVICE_URL is empty")
-    raise SystemExit(1)
-
-if PUBLIC_URL and _norm(PUBLIC_URL) == _norm(USER_SERVICE_URL):
-    logger.error(f"[FATAL] USER_SERVICE_URL points to myself: {USER_SERVICE_URL}")
-    raise SystemExit(1)
-
-
-# ----------------------------------------------------------------------------
-# FastAPI app
-# ----------------------------------------------------------------------------
-app = FastAPI(title="Gateway Service")
-
-# CORS: 프로덕션 도메인은 정확히, 프리뷰는 정규식으로 허용
-ALLOWED_ORIGINS = [
-    "https://load-sigma.vercel.app",  # ← 끝 슬래시( / ) 금지
-]
-ALLOW_ORIGIN_REGEX = r"^https:\/\/[a-z0-9-]+\.vercel\.app$"  # 모든 Vercel 프리뷰 허용
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=ALLOW_ORIGIN_REGEX,
-    allow_credentials=True,     # 쿠키/세션 사용 시 True
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
+app = FastAPI(
+    title="API Gateway",
+    description="LLM 서비스로 요청을 프록시하는 게이트웨이",
+    version="1.0.0"
 )
 
-
-# ----------------------------------------------------------------------------
-# Schemas
-# ----------------------------------------------------------------------------
-class RegisterRequest(BaseModel):
-    username: str
-    password: str
-    email: EmailStr
-    full_name: Optional[str] = None
-
-
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-
-# ----------------------------------------------------------------------------
-# HTTP client (startup/shutdown lifecycle)
-# ----------------------------------------------------------------------------
-TIMEOUT = httpx.Timeout(connect=5.0, read=15.0, write=5.0, pool=5.0)
+# CORS 미들웨어 설정 (프런트엔드에서 직접 게이트웨이 호출 시 필요)
+# llm-service 자체에도 CORS가 있지만, 게이트웨이에도 설정하는 것이 안전함
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # 실제 프로덕션에서는 특정 도메인으로 제한
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.on_event("startup")
-async def on_startup():
-    # 전역 클라이언트를 재사용하여 커넥션 풀 이점 확보
-    app.state.client = httpx.AsyncClient(timeout=TIMEOUT)
-    log_event("startup.httpx_client_ready")
+async def startup_event():
+    logger.info("API 게이트웨이 시작")
+    logger.info(f"LLM 서비스 URL: {LLM_SERVICE_URL}")
 
-@app.on_event("shutdown")
-async def on_shutdown():
-    client: httpx.AsyncClient = app.state.client
-    try:
-        await client.aclose()
-    except Exception:
-        pass
-    log_event("shutdown.httpx_client_closed")
+@app.api_route("/llm/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def proxy_to_llm_service(request: Request, path: str):
+    """
+    /llm/으로 시작하는 모든 요청을 llm-service로 포워딩합니다.
+    스트리밍 응답(SSE)을 지원합니다.
+    """
+    async with httpx.AsyncClient() as client:
+        # 1. llm-service로 보낼 URL 구성
+        url = f"{LLM_SERVICE_URL}/{path}"
 
+        # 2. 원본 요청에서 헤더, 쿼리 파라미터, 본문 추출
+        headers = dict(request.headers)
+        # 호스트 헤더는 프록시되는 서비스의 호스트로 변경해야 함
+        headers.pop("host", None)
+        params = request.query_params
+        body = await request.body()
 
-def _match_cors_origin(origin: Optional[str]) -> bool:
-    if not origin:
-        return False
-    if origin in ALLOWED_ORIGINS:
-        return True
-    if ALLOW_ORIGIN_REGEX and re.match(ALLOW_ORIGIN_REGEX, origin):
-        return True
-    return False
+        logger.info(f"Forwarding request: {request.method} {url}")
 
-
-def _corsify_response(resp: JSONResponse, request: Request) -> JSONResponse:
-    origin = request.headers.get("origin")
-    if _match_cors_origin(origin):
-        resp.headers["Access-Control-Allow-Origin"] = origin
-        resp.headers["Access-Control-Allow-Credentials"] = "true"
-        resp.headers["Access-Control-Expose-Headers"] = "*"
-    return resp
-
-
-async def proxy_request(
-    request: Request,
-    method: str,
-    path: str,
-    params: dict | None = None,
-    json_data: dict | None = None,
-):
-    url = f"{USER_SERVICE_URL}{path}"
-    log_event("request.downstream", method=method, url=url)
-
-    client: httpx.AsyncClient = app.state.client
-    last_err = None
-
-    for attempt in range(3):  # 단순 리트라이 3회
+        # 3. httpx를 사용하여 llm-service에 요청 전송 (스트리밍 모드)
         try:
-            r = await client.request(method, url, params=params, json=json_data)
-            log_event("response.upstream", status=r.status_code, url=url)
-            # 상태코드가 4xx/5xx인 경우 raise_for_status로 분기
-            r.raise_for_status()
-            try:
-                payload = r.json()
-            except ValueError:
-                payload = {"raw": r.text}
-            return _corsify_response(JSONResponse(status_code=r.status_code, content=payload), request)
+            req = client.build_request(
+                method=request.method,
+                url=url,
+                headers=headers,
+                params=params,
+                content=body
+            )
+            r = await client.send(req, stream=True)
 
-        except httpx.HTTPStatusError as e:
-            # 응답은 왔지만 4xx/5xx
-            try:
-                body = e.response.json()
-            except ValueError:
-                body = {"detail": e.response.text[:500]}
-            log_event("response.upstream.error", status=e.response.status_code, body=str(body))
-            resp = JSONResponse(status_code=e.response.status_code, content={"detail": body.get("detail")})
-            return _corsify_response(resp, request)
+            # 4. llm-service의 응답을 클라이언트로 스트리밍
+            # content-type, content-length 등 필요한 헤더를 그대로 전달
+            response_headers = dict(r.headers)
+             # Transfer-Encoding은 스트리밍 방식에 따라 자동으로 처리되므로 제거
+            response_headers.pop("transfer-encoding", None)
 
-        except (httpx.ConnectError, httpx.ReadTimeout) as e:
-            last_err = e
-            log_event("request.downstream.error", error=str(e), url=url)
+            return StreamingResponse(
+                r.aiter_raw(),
+                status_code=r.status_code,
+                headers=response_headers
+            )
+        except httpx.RequestError as e:
+            logger.error(f"LLM 서비스({url}) 연결 오류: {e}")
+            return Response(status_code=503, content="Service Unavailable: Could not connect to LLM service.")
 
-    # 리트라이 후에도 실패
-    resp = JSONResponse(status_code=503, content={"detail": f"Service unavailable: {type(last_err).__name__}"})
-    return _corsify_response(resp, request)
-
-
-# ----------------------------------------------------------------------------
-# Routes (Proxy to user-service)
-# ----------------------------------------------------------------------------
-@app.post("/register")
-async def register(payload: RegisterRequest, request: Request):
-    log_event("request.register", body=payload.model_dump())
-    return await proxy_request(request, "POST", "/register", json_data=payload.model_dump())
-
-
-@app.post("/login")
-async def login(payload: LoginRequest, request: Request):
-    log_event("request.login", body=payload.model_dump())
-    return await proxy_request(request, "POST", "/login", json_data=payload.model_dump())
-
-
-@app.get("/check-username")
-async def check_username(username: str, request: Request):
-    log_event("request.check_username", username=username)
-    return await proxy_request(request, "GET", "/check-username", params={"username": username})
-
-
-@app.get("/users")
-async def list_users(request: Request):
-    log_event("request.users")
-    return await proxy_request(request, "GET", "/users")
-
-
-# ----------------------------------------------------------------------------
-# Health
-# ----------------------------------------------------------------------------
+# 게이트웨이 자체의 상태 확인 엔드포인트
 @app.get("/health")
-async def health():
-    log_event("health.check")
-    return {"status": "ok", "time": datetime.utcnow().isoformat() + "Z"}
-
-@app.get("/healthz")
-async def healthz():
-    log_event("healthz.check")
-    return {"status": "ok", "time": datetime.utcnow().isoformat() + "Z"}
-
-
-# ----------------------------------------------------------------------------
-# Ensure CORS on HTTPException as well
-# ----------------------------------------------------------------------------
-@app.exception_handler(HTTPException)
-async def http_exc_handler(request: Request, exc: HTTPException):
-    resp = JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-    return _corsify_response(resp, request)
-
+def health_check():
+    return {"service": "gateway", "status": "ok"}

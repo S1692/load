@@ -1,0 +1,22 @@
+[
+  {
+    "id": "doc1",
+    "contents": "LangChain은 LLM(거대 언어 모델)을 사용하는 애플리케이션 개발을 간소화하기 위해 설계된 프레임워크입니다. 2024년, LangChain은 버전 0.2를 출시하며 대대적인 변화를 맞이했습니다.",
+    "metadata": { "source": "LC_v0.2_update.txt", "date": "2024.05.20" }
+  },
+  {
+    "id": "doc2",
+    "contents": "Ollama는 Mistral, Llama 3와 같은 오픈 소스 LLM을 로컬에서 쉽게 실행할 수 있게 해주는 도구입니다. `nomic-embed-text` 모델을 사용하여 고품질 임베딩을 생성할 수 있습니다.",
+    "metadata": { "source": "Ollama_intro.txt", "date": "2024.01.15" }
+  },
+  {
+    "id": "doc3",
+    "contents": "FastAPI는 Python 3.8+을 위한 현대적이고, 빠르며(고성능), 웹 API를 구축하기 위한 웹 프레임워크입니다. 비동기 처리를 기본으로 지원하여 높은 처리량을 보여줍니다.",
+    "metadata": { "source": "FastAPI_docs.txt", "date": "2023.12.10" }
+  },
+  {
+    "id": "doc4",
+    "contents": "RAG(검색 증강 생성)는 LLM이 외부 지식 베이스를 참조하여 더 정확하고 사실에 기반한 답변을 생성하도록 하는 기술입니다. JSON, PDF 등 다양한 형식의 문서를 로드하여 벡터 저장소에 저장합니다.",
+    "metadata": { "source": "RAG_concepts.txt", "date": "2024.03.30" }
+  }
+]

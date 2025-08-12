@@ -1,40 +1,59 @@
-version: '3.9'
+version: '3.8'
+
 services:
+  llm-service:
+    build:
+      context: ./llm-service
+      dockerfile: Dockerfile
+    container_name: llm-service
+    # .env.example을 기반으로 .env 파일을 생성하여 사용하세요.
+    # OLLAMA_BASE_URL을 호스트 환경에 맞게 설정해야 합니다.
+    env_file:
+      - ./llm-service/.env
+    # 내부 네트워크에서만 접근 가능하도록 포트를 노출하지 않습니다.
+    # 게이트웨이를 통해서만 접근합니다.
+    networks:
+      - llm_net
+    # Linux에서는 다음 설정이 필요할 수 있습니다.
+    # extra_hosts:
+    #  - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
   gateway:
     build:
-      context: .
-      dockerfile: gateway/Dockerfile
-    container_name: gateway-service
-    env_file:
-      - .env
-    environment:
-      - USER_SERVICE_URL=${USER_SERVICE_URL}
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: gateway
     ports:
+      # 외부 포트 8000을 컨테이너 내부 포트 8000에 매핑합니다.
       - "8000:8000"
-    restart: unless-stopped
-    depends_on:
-      - user-service
-
-  user-service:
-    build:
-      context: .
-      dockerfile: service/Dockerfile
-    container_name: user-service
-    env_file:
-      - .env
     environment:
-      - DATABASE_URL=${DATABASE_URL}
+      # Docker 내부 네트워크에서 서비스 이름으로 llm-service에 접근합니다.
+      - LLM_SERVICE_URL=http://llm-service:8001
+    depends_on:
+      - llm-service
+    networks:
+      - llm_net
     restart: unless-stopped
 
   frontend:
     build:
-      context: .
-      dockerfile: frontend/Dockerfile
-    container_name: login-frontend
+      context: ./frontend
+      dockerfile: Dockerfile # 프런트엔드 Dockerfile을 추가해야 합니다.
+    container_name: frontend
+    ports:
+      # 외부 포트 3000을 컨테이너 내부 포트 3000에 매핑합니다.
+      - "3000:3000"
+    environment:
+      # Next.js 앱이 게이트웨이에 접근할 수 있도록 URL을 전달합니다.
+      # Docker 외부에서 접근하는 URL이므로 localhost를 사용합니다.
+      - NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
     depends_on:
       - gateway
-    environment:
-      - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_GATEWAY_URL}
-    ports:
-      - "3000:3000"
+    networks:
+      - llm_net
     restart: unless-stopped
+
+networks:
+  llm_net:
+    driver: bridge
