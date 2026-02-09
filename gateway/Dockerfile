@@ -1,19 +1,25 @@
-# Dockerfile for the FastAPI gateway
+# 1. Base Image
 FROM python:3.11-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+# 2. Set Environment Variables
+ENV PYTHONUNBUFFERED 1
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV WORKDIR /app
+WORKDIR $WORKDIR
 
-WORKDIR /app
+# 3. Install Dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# deps
-COPY requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# 4. Copy Application Code
+COPY ./app ./app
 
-# app
-COPY app ./app
+# 5. Expose Port
+# This is the internal port for the gateway service. It will be mapped to an
+# external port in docker-compose.
+EXPOSE 8000
 
-EXPOSE 8080
-ENV PORT=8080
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# 6. Run Application
+# Use Gunicorn with Uvicorn workers for the ASGI app.
+CMD ["gunicorn", "-w", "2", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000", "app.main:app"]
